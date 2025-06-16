@@ -1,0 +1,85 @@
+steps:
+
+# These bits would install via Provisionator normally, so try
+# to keep them in sync. Ideally we'll be able to run Prov in
+# VSTS+YAML like we do for our "big builds".
+
+- script: |
+    MONO_VERSION=5.12.0.273
+    MONO_PACKAGE="MonoFramework-MDK-${MONO_VERSION}.macos10.xamarin.universal.pkg"
+    curl -LO "https://dl.xamarin.com/MonoFrameworkMDK/Macx86/${MONO_PACKAGE}"
+    sudo installer -target / -pkg "${MONO_PACKAGE}"
+    sudo build/select-mono.sh latest
+  condition: and(succeeded(), eq(variables['agent.os'], 'darwin'))
+  displayName: Install Mono
+
+- task: DotNetCoreInstaller@0
+  inputs:
+    version: 2.1.301
+  displayName: Install .NET Core
+
+- task: NodeTool@0
+  inputs:
+    versionSpec: 8.x
+  displayName: Install Node.js
+
+- task: NuGetToolInstaller@0
+  inputs:
+    versionSpec: 4.6.2
+  displayName: Install NuGet CLI
+
+- script: npm install -g yarn
+  displayName: Install Yarn
+
+# This script runs both via bash (macOS/Linux) and cmd (Windows).
+# Keep it both valid bash and batch or break it out conditionally.
+- script: |
+    echo System Environment
+    set
+    echo .NET Core Info
+    dotnet --info
+  displayName: Dump Environment
+
+- task: MSBuild@1
+  inputs:
+    solution: build.proj
+    configuration: '$(msbuild.configuration)'
+    msbuildArguments: '/t:Restore /p:Profile=$(msbuild.buildProfile)'
+  displayName: Restore
+
+- task: MSBuild@1
+  inputs:
+    solution: build.proj
+    msbuildArguments: '/t:Build'
+  displayName: Build
+
+- task: MSBuild@1
+  inputs:
+    solution: build.proj
+    msbuildArguments: '/t:Package'
+  displayName: Package
+
+- task: MSBuild@1
+  inputs:
+    solution: build.proj
+    msbuildArguments: '/t:ArchiveSymbolFiles'
+  displayName: Archive Symbol Files
+
+- task: PublishBuildArtifacts@1
+  inputs:
+    PathtoPublish: '_artifacts'
+    ArtifactName: Artifacts
+    publishLocation: Container
+  displayName: Publish Artifacts
+
+- task: MSBuild@1
+  inputs:
+    solution: build.proj
+    msbuildArguments: '/t:Test'
+  displayName: Run xUnit Tests
+
+- task: PublishTestResults@2
+  inputs:
+    testRunner: XUnit
+    testResultsFiles: '**/*.Tests.xml'
+  displayName: Publish xUnit Test Results
